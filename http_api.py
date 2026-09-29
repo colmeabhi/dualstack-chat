@@ -34,6 +34,47 @@ class Handler(BaseHTTPRequestHandler):
     # Every HTTP method goes through the same function.
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = handle_request
 
+    def route(self, method):
+        """Return (status code, body) for this request."""
+        url = urlparse(self.path)
+        # "/channels/%23cs249/users" -> ["channels", "#cs249", "users"]
+        parts = [unquote(p) for p in url.path.split("/") if p]
+        state = self.server.state
+
+        match parts:
+            case ["health"]:
+                allow(method, "GET")
+                return 200, {"status": "ok"}
+
+            case ["users"]:
+                allow(method, "GET", "POST")
+                if method == "GET":
+                    return 200, {"users": state.list_users()}
+                username = self.body_field("username")
+                state.add_user(username)
+                return 201, {"username": username}
+
+            case ["channels"]:
+                allow(method, "GET")
+                return 200, {"channels": state.list_channels()}
+
+            case ["channels", channel, "members"]:
+                allow(method, "POST")
+                username = self.x_user()
+                state.join(username, channel)
+                return 200, {"channel": channel, "username": username, "joined": True}
+
+            case ["channels", channel, "members", username]:
+                allow(method, "DELETE")
+                state.leave(username, channel)
+                return 200, {"channel": channel, "username": username, "left": True}
+
+            case ["channels", channel, "users"]:
+                allow(method, "GET")
+                return 200, {"channel": channel, "users": state.channel_users(channel)}
+
+        raise ChatError(404, "NOT_FOUND", f"Unknown path {url.path}.")
+
     def x_user(self):
         """HTTP has no login, so the X-User header says who is acting."""
         username = self.headers.get("X-User")
