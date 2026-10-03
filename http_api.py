@@ -73,6 +73,14 @@ class Handler(BaseHTTPRequestHandler):
                 allow(method, "GET")
                 return 200, {"channel": channel, "users": state.channel_users(channel)}
 
+            case ["channels", channel, "messages"]:
+                allow(method, "GET", "POST")
+                if method == "POST":
+                    message = state.send(self.x_user(), channel, self.body_field("text"))
+                    return 201, message
+                limit = int(parse_qs(url.query).get("limit", ["20"])[0])
+                return 200, {"channel": channel, "messages": state.history(channel, limit)}
+
         raise ChatError(404, "NOT_FOUND", f"Unknown path {url.path}.")
 
     def x_user(self):
