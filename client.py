@@ -23,6 +23,24 @@ def main() -> int:
             print(f"Connected to Mini Discord at {args.host}:{args.port}")
             print("Type a command, or press Ctrl-D to close the client unexpectedly.")
 
+            while True:
+                try:
+                    command = input("> ")
+                except EOFError:
+                    print()
+                    break
+                except KeyboardInterrupt:
+                    print("\nConnection closed without QUIT.")
+                    break
+
+                sock.sendall((command + "\n").encode("utf-8"))
+                response = reader.readline()
+                if not response:
+                    print("The server closed the connection.", file=sys.stderr)
+                    return 1
+                print(response.rstrip("\n"))
+                if command.strip().upper() == "QUIT":
+                    break
     except OSError as error:
         print(f"Could not connect to Mini Discord: {error}", file=sys.stderr)
         return 1
