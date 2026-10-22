@@ -90,3 +90,59 @@ Example: Alice and Bob send at the same instant. One thread gets the lock first 
 **Consequences.**
 - Empty channels stay in the channel list after the last user leaves.
 
+## ADR-5: Each TCP connection remembers who is logged in on it
+
+**Status:** Accepted
+
+**Context.** The server must notice when a TCP client disconnects unexpectedly, log that user out, and remove them from every channel.
+
+**Decision.** Each client thread keeps a small `session = {"user": None}` for its own connection. `LOGIN` fills it in; `ChatState.online` records which usernames are logged in anywhere, so one username can be logged in on only one connection at a time. When the read loop ends for any reason (QUIT, Ctrl-D, killed process, reset connection), a `finally` block calls `state.logout(session["user"])`.
+
+`LIST` and `HISTORY` do not require login, matching the public HTTP GET endpoints. `JOIN`, `LEAVE`, and `SEND` do.
+
+Example: Charlie logs in, joins `#cs249`, and closes the terminal. Charlie's thread sees end-of-stream, the `finally` block runs, and Charlie is removed from `#cs249`. Other clients are unaffected.
+
+**Consequences.**
+- Cleanup has exactly one owner: the thread that served that connection.
+- A second login for the same username gets `CONFLICT`.
+- HTTP has no sessions; identity comes from the `X-User` header.
+
+## ADR-6: JSON lines and one error format
+
+**Status:** Accepted
+
+**Context.** TCP is a byte stream with no built-in message boundaries. HTTP errors must also be JSON.
+
+**Decision.**
+- Every TCP request is one line ending in `\n`. Every response is one JSON object followed by `\n`.
+- Every error, on both interfaces, looks like `{"status":"error","code":"...","message":"..."}`. Expected errors are raised as `ChatError` inside `state.py` and turned into JSON at the edge.
+- Malformed input is caught in one place per interface: a missing TCP argument (`IndexError`), a non-numeric limit, or invalid JSON (`ValueError`) all return `BAD_REQUEST`.
+- Unknown HTTP paths return `404`; a known path with the wrong method returns `405`.
+- Names are checked where they are created: `add_user` rejects usernames outside letters, digits, `-`, `_` (`INVALID_USERNAME`), and `join` rejects channels that do not match `#` plus those characters (`INVALID_CHANNEL`).
+- Any other unexpected exception becomes `SERVER_ERROR` (HTTP 500) instead of dropping the request or the TCP connection.
+
+**Consequences.**
+- One bad request never stops the server or closes a valid connection.
+- Lists are sorted so output is predictable.
+
+## ADR-7: Test by hand with curl and the TCP client
+
+**Status:** Accepted
+
+**Decision.** There is no automated test suite. The server is tested by following the assignment's demonstration sequence: `curl` for every HTTP endpoint, `client.py` for the TCP commands, several clients at once for concurrency, and closing a client without `QUIT` for failure detection. README.txt lists the commands.
+
+**Consequences.** Nothing extra to install or maintain. Every check must be repeated by hand after a change.
+
+## ADR-8: Print server events to stderr
+
+**Status:** Accepted
+
+**Decision.** The server prints only four kinds of lines: the two startup lines, TCP connect, and TCP disconnect. They go to `stderr`, the same stream `http.server` uses for its request log, so all lines appear in order even when output is redirected to a file.
+
+**Consequences.** A failed client is visible the moment it happens:
+
+```
+TCP client connected from 127.0.0.1:57981
+TCP client disconnected: dave
+127.0.0.1 - - [24/Sep/2026 22:51:09] "GET /channels/%23cs249/users HTTP/1.1" 200 -
+```
